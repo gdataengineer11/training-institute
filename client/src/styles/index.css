@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== Premium background (non-blocking) ===== */
+.premium-bg {
+  position: relative;
+  min-height: 100dvh;
+  background:
+    radial-gradient(1000px 520px at 15% -10%, #7c3aed33, transparent 60%),
+    radial-gradient(800px 480px at 110% 0%, #06b6d433, transparent 60%),
+    #0b1020;
+  overflow: hidden;
+}
+.premium-bg::before,
+.premium-bg::after {
+  content: "";
+  position: absolute; inset: -20%;
+  background: conic-gradient(from 180deg at 50% 50%, #7c3aed55, #06b6d433, #22c55e33, #7c3aed55);
+  filter: blur(80px);
+  animation: aurora 26s linear infinite;
+  opacity: .42;
+  mix-blend-mode: screen;
+  pointer-events: none;
+  z-index: 0;
+}
+.premium-bg::after { animation-direction: reverse; opacity: .32; }
+.premium-bg > * { position: relative; z-index: 1; }
+
+@keyframes aurora {
+  0% { transform: translate3d(-2%, -2%, 0) rotate(0deg); }
+  50% { transform: translate3d(2%, 2%, 0) rotate(180deg); }
+  100% { transform: translate3d(-2%, -2%, 0) rotate(360deg); }
+}
+
+/* ===== Zoom-stable auth layout (single column) ===== */
+.auth-shell {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: clamp(16px, 4vw, 48px);
+}
+.auth-card { width: min(520px, 100%); } /* Corrected line */
+
+/* ===== Frame + glass + button ===== */
+.gradient-frame {
+  padding: 2px;
+  border-radius: 22px;
+  background: linear-gradient(135deg, #7C3AED, #06B6D4);
+}
+.glass {
+  background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.06));
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,.16);
+  box-shadow: 0 10px 30px rgba(2,6,23,.35), inset 0 1px 0 rgba(255,255,255,.1);
+}
+.btn-gradient { color:#fff; background: linear-gradient(90deg, #7C3AED, #06B6D4); }
+.btn-gradient:hover { filter: brightness(1.05); }
+.btn-gradient:disabled { filter: grayscale(.2) brightness(.9); box-shadow: none; }
+
+/* ===== MUI Filled input + autofill tidy inside glass ===== */
+.glass .MuiFilledInput-root { background-color: rgba(255,255,255,.06) !important; color: #fff; border-radius: 12px; }
+.glass .MuiFilledInput-root:hover { background-color: rgba(255,255,255,.08) !important; }
+.glass .MuiFilledInput-root.Mui-focused { background-color: rgba(255,255,255,.10) !important; }
+.glass .MuiFilledInput-root::before,
+.glass .MuiFilledInput-root::after { display: none !important; }
+.glass .MuiInputAdornment-root { color: rgba(255,255,255,.75); }
+.glass input:-webkit-autofill,
+.glass input:-webkit-autofill:hover,
+.glass input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #fff;
+  caret-color: #fff;
+  box-shadow: 0 0 0 1000px rgba(255,255,255,.06) inset !important;
+  -webkit-box-shadow: 0 0 0 1000px rgba(255,255,255,.06) inset !important;
+  transition: background-color 99999s ease-in-out 0s;
+}
