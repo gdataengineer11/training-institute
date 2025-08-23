@@ -1,6 +1,10 @@
-import { Router } from 'express';
-import { loginHandler } from '../controllers/auth.controller.js';
+import { Router } from 'express'
+import { loginHandler, meHandler } from '../controllers/auth.controller.js'
+import { requireAuth } from '../middleware/requireAuth.js'
 
-const router = Router();
-router.post('/login', loginHandler);
-export default router;
+const router = Router()
+
+router.post('/login', loginHandler)
+router.get('/me', requireAuth, meHandler)
+
+export default router

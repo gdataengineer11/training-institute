@@ -7,54 +7,215 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id           Int      @id @default(autoincrement())
-  username     String   @unique
-  passwordHash String
-  fullName     String
-  role         String   @default("ADMIN")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+// ===== Enums =====
+enum Role {
+  ADMIN
+  MANAGER
+  COUNSELOR
+  FINANCE
+  VIEWER
 }
 
-model Student {
+enum EnrollStatus {
+  LEAD
+  APPLICANT
+  ENROLLED
+  ACTIVE
+  COMPLETED
+  ALUMNI
+  CANCELED
+}
+
+enum PayStatus {
+  PENDING
+  PARTIAL
+  PAID
+  REFUNDED
+}
+
+// ===== Models =====
+model User {
+  id            Int                       @id @default(autoincrement())
+  username      String                    @unique
+  passwordHash  String
+  fullName      String
+  role          Role                      @default(ADMIN)
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+  savedViews    SavedView[]
+  logs          AuditLog[]
+  statusChanges EnrollmentStatusHistory[]
+}
+
+model Program {
   id        Int      @id @default(autoincrement())
-  firstName String
-  lastName  String
-  email     String   @unique
+  name      String   @unique
   createdAt DateTime @default(now())
-  enrollments Enrollment[]
-  payments    Payment[]
+  batches   Batch[]
+}
+
+model Batch {
+  id        Int       @id @default(autoincrement())
+  name      String
+  programId Int
+  program   Program   @relation(fields: [programId], references: [id])
+  sessions  Session[]
 }
 
 model Session {
-  id        Int       @id @default(autoincrement())
-  name      String
-  startDate DateTime
-  endDate   DateTime
-  createdAt DateTime @default(now())
+  id          Int          @id @default(autoincrement())
+  name        String
+  startDate   DateTime
+  endDate     DateTime
+  batchId     Int?
+  batch       Batch?       @relation(fields: [batchId], references: [id])
+  createdAt   DateTime     @default(now())
   enrollments Enrollment[]
 }
 
+model Student {
+  id              Int                       @id @default(autoincrement())
+  firstName       String
+  lastName        String
+  email           String                    @unique
+  phone           String?
+  dob             DateTime?
+  address         String?
+  city            String?
+  state           String?
+  zip             String?
+  status          EnrollStatus              @default(LEAD)
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  enrollments     Enrollment[]
+  payments        Payment[]
+  guardians       Guardian[]
+  documents       StudentDocument[]
+  tags            StudentTag[]
+  statusHistories EnrollmentStatusHistory[]
+  notes           String?
+}
+
+model Guardian {
+  id        Int     @id @default(autoincrement())
+  studentId Int
+  relation  String
+  name      String
+  phone     String?
+  email     String?
+  student   Student @relation(fields: [studentId], references: [id])
+}
+
 model Enrollment {
-  id         Int      @id @default(autoincrement())
-  studentId  Int
-  sessionId  Int
-  createdAt  DateTime @default(now())
-  student    Student  @relation(fields: [studentId], references: [id])
-  session    Session  @relation(fields: [sessionId], references: [id])
+  id        Int      @id @default(autoincrement())
+  studentId Int
+  sessionId Int
+  joinedAt  DateTime @default(now())
+  student   Student  @relation(fields: [studentId], references: [id])
+  session   Session  @relation(fields: [sessionId], references: [id])
+  feePlan   FeePlan?
+}
+
+model FeePlan {
+  id           Int           @id @default(autoincrement())
+  enrollmentId Int           @unique
+  currency     String        @default("INR")
+  listPrice    Float
+  discount     Float         @default(0)
+  netPayable   Float
+  installments Installment[]
+  enrollment   Enrollment    @relation(fields: [enrollmentId], references: [id])
+}
+
+model Installment {
+  id           Int                  @id @default(autoincrement())
+  feePlanId    Int
+  dueDate      DateTime
+  amount       Float
+  status       PayStatus            @default(PENDING)
+  paidOn       DateTime?
+  feePlan      FeePlan              @relation(fields: [feePlanId], references: [id])
+  transactions PaymentTransaction[]
+
+  @@index([dueDate])
+  @@index([status])
 }
 
 model Payment {
-  id        Int      @id @default(autoincrement())
+  id        Int       @id @default(autoincrement())
   studentId Int
   amount    Float
-  status    PaymentStatus @default(PENDING)
-  createdAt DateTime @default(now())
-  student   Student  @relation(fields: [studentId], references: [id])
+  status    PayStatus @default(PENDING)
+  createdAt DateTime  @default(now())
+  student   Student   @relation(fields: [studentId], references: [id])
 }
 
-enum PaymentStatus {
-  PAID
-  PENDING
+model PaymentTransaction {
+  id            Int         @id @default(autoincrement())
+  installmentId Int
+  amount        Float
+  reference     String?
+  createdAt     DateTime    @default(now())
+  installment   Installment @relation(fields: [installmentId], references: [id])
+}
+
+model StudentDocument {
+  id         Int      @id @default(autoincrement())
+  studentId  Int
+  title      String
+  filename   String
+  url        String
+  verified   Boolean  @default(false)
+  uploadedAt DateTime @default(now())
+  student    Student  @relation(fields: [studentId], references: [id])
+}
+
+model Tag {
+  id       Int          @id @default(autoincrement())
+  name     String       @unique
+  color    String?
+  students StudentTag[]
+}
+
+model StudentTag {
+  studentId Int
+  tagId     Int
+
+  student Student @relation(fields: [studentId], references: [id])
+  tag     Tag     @relation(fields: [tagId], references: [id])
+
+  @@id([studentId, tagId])
+}
+
+model EnrollmentStatusHistory {
+  id        Int          @id @default(autoincrement())
+  studentId Int
+  from      EnrollStatus
+  to        EnrollStatus
+  changedAt DateTime     @default(now())
+  userId    Int?
+
+  student Student @relation(fields: [studentId], references: [id])
+  user    User?   @relation(fields: [userId], references: [id])
+}
+
+model SavedView {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  name      String
+  entity    String
+  config    Json
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  action    String
+  entity    String
+  entityId  Int?
+  meta      Json?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id])
 }

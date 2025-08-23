@@ -1,53 +1,42 @@
-import { PrismaClient } from '@prisma/client';
-import bcrypt from 'bcrypt';
-import jwt from 'jsonwebtoken';
-import { z } from 'zod';
+import { PrismaClient } from '@prisma/client'
+import bcrypt from 'bcryptjs'
+import jwt from 'jsonwebtoken'
 
-const prisma = new PrismaClient();
-
-const LoginSchema = z.object({
-  username: z.string().min(1, 'Required'),
-  password: z.string().min(1, 'Required'),
-});
+const prisma = new PrismaClient()
+const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret'
 
 export async function loginHandler(req, res) {
   try {
-    const { username, password } = LoginSchema.parse(req.body);
+    const username = (req.body.username || '').trim()
+    const password = req.body.password || ''
+    if (!username || !password) return res.status(400).json({ error: 'username and password required' })
 
-    // Normalize usernames to lowercase everywhere
-    const uname = username.trim().toLowerCase();
+    const user = await prisma.user.findUnique({ where: { username } })
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' })
 
-    // Look up by normalized username
-    const user = await prisma.user.findUnique({ where: { username: uname } });
-    if (!user) {
-      if (process.env.AUTH_DEBUG === 'true') console.debug('[LOGIN] user not found:', uname);
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
+    const ok = await bcrypt.compare(password, user.passwordHash)
+    if (!ok) return res.status(401).json({ error: 'Invalid credentials' })
 
-    const ok = await bcrypt.compare(password, user.passwordHash);
-    if (!ok) {
-      if (process.env.AUTH_DEBUG === 'true') console.debug('[LOGIN] password mismatch for:', uname);
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
+    const token = jwt.sign({ sub: user.id, role: user.role }, JWT_SECRET, { expiresIn: '8h' })
+    res.json({ token, user: { id: user.id, username: user.username, fullName: user.fullName, role: user.role } })
+  } catch (e) {
+    console.error('Login error:', e)
+    res.status(500).json({ error: 'Server error' })
+  }
+}
 
-    if (!process.env.JWT_SECRET) {
-      console.error('JWT_SECRET missing');
-      return res.status(500).json({ message: 'Server misconfigured' });
-    }
-
-    const token = jwt.sign(
-      { sub: user.id, username: user.username, role: user.role, name: user.fullName },
-      process.env.JWT_SECRET,
-      { expiresIn: '8h' }
-    );
-
-    res.json({
-      token,
-      user: { id: user.id, username: user.username, fullName: user.fullName, role: user.role }
-    });
-  } catch (err) {
-    if (err.name === 'ZodError') return res.status(400).json({ message: 'Invalid input' });
-    console.error(err);
-    res.status(500).json({ message: 'Unexpected error' });
+export async function meHandler(req, res) {
+  try {
+    const userId = req.jwt?.sub
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' })
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, username: true, fullName: true, role: true, createdAt: true }
+    })
+    if (!user) return res.status(404).json({ error: 'User not found' })
+    res.json({ user })
+  } catch (e) {
+    console.error('Me error:', e)
+    res.status(500).json({ error: 'Server error' })
   }
 }
