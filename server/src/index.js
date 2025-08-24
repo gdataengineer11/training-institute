@@ -1,53 +1,68 @@
 // server/src/index.js
 import 'dotenv/config';
+import path from 'path';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import path from 'path';
+import { fileURLToPath } from 'url';
 
 import authRoutes from './routes/auth.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
-import studentsRoutes from './routes/students.routes.js';
+import inventoryRoutes from './routes/inventory.routes.js';
 import { errorHandler } from './middleware/error.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// CORS (dev): allow the Vite dev server
-app.use(cors({
-  origin: 'http://localhost:5173',
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization'],
-  credentials: true
-}));
+/* ---------- Security / CORS ---------- */
+const allowed = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173').split(',');
+app.use(cors({ origin: allowed, credentials: true }));
+app.use(helmet({ crossOriginResourcePolicy: false }));
 
-app.use(helmet());
-app.use(express.json());
+/* ---------- Logging ---------- */
 app.use(morgan('dev'));
 
-// Static uploads (for documents, if any)
+/* ---------- Body parsers ---------- */
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+/* ---------- Static ---------- */
 app.use('/uploads', express.static(path.resolve('uploads')));
 
-// ✅ Health endpoints (add BEFORE other middleware/fallbacks)
-app.get('/health', (_req, res) => {
-  res.status(200).json({ ok: true, time: new Date().toISOString() });
-});
-app.get('/api/health', (_req, res) => {
-  res.status(200).json({ ok: true, time: new Date().toISOString() });
-});
+/* ---------- Disable HTTP caching for APIs ---------- */
+// Turn off ETag so Express won't return 304 on identical bodies
+app.set('etag', false);
+// And add explicit no-cache headers
+function noCache(req, res, next) {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  res.set('Surrogate-Control', 'no-store');
+  next();
+}
+app.use('/api', noCache);
 
-// API routes
+/* ---------- Health ---------- */
+app.get('/health', (_req, res) => res.json({ ok: true }));
+
+/* ---------- Routes ---------- */
 app.use('/api/auth', authRoutes);
 app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/students', studentsRoutes);
+app.use('/api/inventory', inventoryRoutes);
 
-// 404 JSON fallback (so you don't see "Cannot GET /...")
-app.use((req, res) => {
-  res.status(404).json({ message: `Not Found: ${req.method} ${req.originalUrl}` });
-});
-
-// Centralized error handler
+/* ---------- Errors ---------- */
 app.use(errorHandler);
 
+/* ---------- Start ---------- */
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log(`API on http://localhost:${PORT}`));
+function maskDb(url) {
+  try { const u = new URL(url); return `${u.protocol}//${u.hostname}:${u.port}${u.pathname}`; }
+  catch { return 'UNKNOWN_DB_URL'; }
+}
+app.listen(PORT, () => {
+  console.log(`API on http://localhost:${PORT}`);
+  console.log(`[DB] ${maskDb(process.env.DATABASE_URL || '')}`);
+});

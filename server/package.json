@@ -2,17 +2,17 @@
   "name": "FSA-server",
   "version": "1.1.0",
   "type": "module",
-  "main": "src/index.js",
   "scripts": {
     "dev": "nodemon src/index.js",
-    "start": "node src/index.js",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev --name enrollments",
-    "prisma:seed": "node prisma/seed.js"
+    "prisma:validate": "prisma validate",
+    "prisma:migrate": "prisma migrate dev --name init",
+    "prisma:seed": "node prisma/seed.js",
+    "peek:users": "node scripts/peek-users.js"
   },
   "dependencies": {
-    "@prisma/client": "^5.16.1",
-    "bcrypt": "^5.1.1",
+    "@prisma/client": "^5.22.0",
+    "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "exceljs": "^4.4.0",
@@ -20,14 +20,13 @@
     "helmet": "^7.1.0",
     "json2csv": "^6.0.0-alpha.2",
     "jsonwebtoken": "^9.0.2",
-    "mime": "^4.0.4",
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
-    "pdfkit": "^0.15.0",
-    "zod": "^3.23.8"
+    "pdfkit": "^0.17.1",
+    "zod": "^4.1.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.4",
-    "prisma": "^5.16.1"
+    "nodemon": "^3.1.10",
+    "prisma": "^5.22.0"
   }
 }

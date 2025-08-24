@@ -1,3 +1,5 @@
+// server/prisma/schema.prisma
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,54 +9,193 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Enums
+enum Role {
+  ADMIN
+  MANAGER
+  COUNSELOR
+  FINANCE
+  VIEWER
+}
+
+enum PayStatus {
+  PENDING
+  PARTIAL
+  PAID
+}
+
+enum InvStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum TxnType {
+  RECEIVE
+  ISSUE
+  ADJUST
+  RETURN
+  DISPOSE
+}
+
+// Users
 model User {
   id           Int      @id @default(autoincrement())
   username     String   @unique
   passwordHash String
   fullName     String
-  role         String   @default("ADMIN")
+  role         Role     @default(ADMIN)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
 
+// Students / Programs / Sessions / Enrollments
 model Student {
-  id        Int      @id @default(autoincrement())
-  firstName String
-  lastName  String
-  email     String   @unique
-  createdAt DateTime @default(now())
+  id          Int          @id @default(autoincrement())
+  firstName   String
+  lastName    String
+  email       String       @unique
+  phone       String?
+  status      String       @default("ACTIVE")
   enrollments Enrollment[]
-  payments    Payment[]
+  tags        StudentTag[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model Program {
+  id      Int     @id @default(autoincrement())
+  name    String  @unique
+  batches Batch[]
+}
+
+model Batch {
+  id        Int       @id @default(autoincrement())
+  name      String
+  programId Int
+  program   Program   @relation(fields: [programId], references: [id])
+  sessions  Session[]
 }
 
 model Session {
-  id        Int       @id @default(autoincrement())
-  name      String
-  startDate DateTime
-  endDate   DateTime
-  createdAt DateTime @default(now())
+  id          Int          @id @default(autoincrement())
+  name        String       @unique
+  startDate   DateTime
+  endDate     DateTime
+  batchId     Int
+  batch       Batch        @relation(fields: [batchId], references: [id])
   enrollments Enrollment[]
 }
 
 model Enrollment {
-  id         Int      @id @default(autoincrement())
-  studentId  Int
-  sessionId  Int
-  createdAt  DateTime @default(now())
-  student    Student  @relation(fields: [studentId], references: [id])
-  session    Session  @relation(fields: [sessionId], references: [id])
-}
-
-model Payment {
   id        Int      @id @default(autoincrement())
   studentId Int
-  amount    Float
-  status    PaymentStatus @default(PENDING)
-  createdAt DateTime @default(now())
+  sessionId Int
+  joinedAt  DateTime @default(now())
   student   Student  @relation(fields: [studentId], references: [id])
+  session   Session  @relation(fields: [sessionId], references: [id])
+  feePlan   FeePlan?
+
+  @@index([joinedAt])
 }
 
-enum PaymentStatus {
-  PAID
-  PENDING
+model FeePlan {
+  id           Int           @id @default(autoincrement())
+  enrollmentId Int           @unique
+  currency     String        @default("USD")
+  listPrice    Int
+  discount     Int           @default(0)
+  netPayable   Int
+  enrollment   Enrollment    @relation(fields: [enrollmentId], references: [id])
+  installments Installment[]
+}
+
+model Installment {
+  id        Int       @id @default(autoincrement())
+  feePlanId Int
+  dueDate   DateTime
+  amount    Float
+  status    PayStatus @default(PENDING)
+  paidOn    DateTime?
+  feePlan   FeePlan   @relation(fields: [feePlanId], references: [id])
+
+  @@index([status, dueDate])
+}
+
+// Tags (many-to-many)
+model Tag {
+  id       Int          @id @default(autoincrement())
+  name     String       @unique
+  color    String?
+  students StudentTag[]
+}
+
+model StudentTag {
+  studentId Int
+  tagId     Int
+  student   Student @relation(fields: [studentId], references: [id])
+  tag       Tag     @relation(fields: [tagId], references: [id])
+
+  @@id([studentId, tagId])
+}
+
+// Inventory / Suppliers
+model Supplier {
+  id        Int             @id @default(autoincrement())
+  name      String          @unique
+  contact   String?
+  phone     String?
+  email     String?
+  address   String?
+  items     InventoryItem[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+}
+
+model InventoryItem {
+  id                Int                    @id @default(autoincrement())
+  name              String
+  sku               String                 @unique
+  category          String?
+  unit              String?                @default("pcs")
+  stock             Int                    @default(0)
+  issued            Int                    @default(0)
+  lowStockThreshold Int                    @default(0)
+  location          String?
+  status            InvStatus              @default(ACTIVE)
+  imageUrl          String?
+  supplierId        Int?
+  supplier          Supplier?              @relation(fields: [supplierId], references: [id])
+  notes             String?
+  transactions      InventoryTransaction[]
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  @@index([status])
+  @@index([category])
+  @@index([updatedAt])
+}
+
+model InventoryTransaction {
+  id        Int           @id @default(autoincrement())
+  itemId    Int
+  type      TxnType
+  qty       Int
+  note      String?
+  userId    Int?
+  createdAt DateTime      @default(now())
+  item      InventoryItem @relation(fields: [itemId], references: [id])
+
+  @@index([itemId, createdAt])
+  @@index([type])
+}
+
+// Audit Log
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  action    String
+  entity    String
+  entityId  Int?
+  userId    Int?
+  meta      Json?
+  createdAt DateTime @default(now())
 }

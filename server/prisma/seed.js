@@ -1,54 +1,93 @@
-import { PrismaClient } from '@prisma/client';
-import bcrypt from 'bcrypt';
-const prisma = new PrismaClient();
+// prisma/seed.js
+import { PrismaClient } from '@prisma/client'
+import bcrypt from 'bcryptjs'
+
+const prisma = new PrismaClient()
 
 async function main() {
-  // Admin
-  const passwordHash = await bcrypt.hash('admin123', 10);
+  // Admin user
+  const adminPwdHash = await bcrypt.hash('Admin@123', 10)
   await prisma.user.upsert({
     where: { username: 'admin' },
-    update: {},
-    create: { username: 'admin', passwordHash, fullName: 'Admin User', role: 'ADMIN' }
-  });
-
-  // Programs + Batches
-  const prog = await prisma.program.upsert({
-    where: { name: 'Full-Stack Web' },
-    update: {},
-    create: { name: 'Full-Stack Web' }
-  });
-  const batchA = await prisma.batch.create({ data: { name: 'FSW-A', programId: prog.id } });
-
-  // Sessions
-  const s1 = await prisma.session.create({
-    data: { name: 'Spring 2025', startDate: new Date(), endDate: new Date(Date.now()+90*864e5), batchId: batchA.id }
-  });
+    update: {
+      passwordHash: adminPwdHash,
+      fullName: 'System Admin',
+      role: 'ADMIN',
+    },
+    create: {
+      username: 'admin',
+      passwordHash: adminPwdHash,
+      fullName: 'System Admin',
+      role: 'ADMIN',
+    },
+  })
 
   // Tags
-  const [tHot, tScholar] = await prisma.$transaction([
-    prisma.tag.upsert({ where: { name: 'Hot' }, update: {}, create: { name: 'Hot', color: '#ef4444' } }),
-    prisma.tag.upsert({ where: { name: 'Scholarship' }, update: {}, create: { name: 'Scholarship', color: '#22c55e' } })
-  ]);
+  const [tNew, tScholar] = await Promise.all([
+    prisma.tag.upsert({ where: { name: 'New' }, update: {}, create: { name: 'New', color: '#3b82f6' } }),
+    prisma.tag.upsert({ where: { name: 'Scholarship' }, update: {}, create: { name: 'Scholarship', color: '#10b981' } }),
+  ])
 
-  // Students + enrollments + fee plans
-  for (let i=1;i<=24;i++) {
-    const st = await prisma.student.create({
+  // Program/Batch/Session
+  const program = await prisma.program.upsert({
+    where: { name: 'Cloud & AI Bootcamp' },
+    update: {},
+    create: { name: 'Cloud & AI Bootcamp' },
+  })
+  const batch = await prisma.batch.create({ data: { name: 'Batch A', programId: program.id } })
+  const session = await prisma.session.create({
+    data: { name: 'Aug 2025', startDate: new Date('2025-08-01'), endDate: new Date('2025-10-31'), batchId: batch.id },
+  })
+
+  // Student
+  const student = await prisma.student.upsert({
+    where: { email: 'student1@example.com' },
+    update: { firstName: 'Aarav', lastName: 'Singh', status: 'LEAD' },
+    create: {
+      firstName: 'Aarav',
+      lastName: 'Singh',
+      email: 'student1@example.com',
+      phone: '9999999999',
+      city: 'Varanasi',
+      state: 'UP',
+      status: 'LEAD',
+      tags: { create: [{ tag: { connect: { id: tNew.id } } }, { tag: { connect: { id: tScholar.id } } }] },
+      guardians: { create: [{ relation: 'Father', name: 'R. Singh', phone: '8888888888' }] },
+    },
+  })
+
+  // Enrollment + FeePlan + Installments (avoid duplicate)
+  const existing = await prisma.enrollment.findFirst({ where: { studentId: student.id, sessionId: session.id } })
+  if (!existing) {
+    await prisma.enrollment.create({
       data: {
-        firstName: `Student${i}`, lastName: `Last${i}`, email: `s${i}@example.com`,
-        phone: `555-100${i}`, status: i%5===0 ? 'APPLICANT' : 'ACTIVE'
-      }
-    });
-    await prisma.studentTag.create({ data: { studentId: st.id, tagId: i%4===0 ? tScholar.id : tHot.id } });
-    const enr = await prisma.enrollment.create({ data: { studentId: st.id, sessionId: s1.id, joinedAt: new Date(Date.now()-i*864e5) } });
-    const plan = await prisma.feePlan.create({ data: { enrollmentId: enr.id, listPrice: 1200, discount: i%3===0 ? 200:0, netPayable: i%3===0 ? 1000:1200, currency: 'USD' } });
-    await prisma.installment.createMany({
-      data: [
-        { feePlanId: plan.id, amount: (plan.netPayable/2), dueDate: new Date(Date.now()+15*864e5), status: 'PENDING' },
-        { feePlanId: plan.id, amount: (plan.netPayable/2), dueDate: new Date(Date.now()+45*864e5), status: 'PENDING' }
-      ]
-    });
+        studentId: student.id,
+        sessionId: session.id,
+        feePlan: {
+          create: {
+            currency: 'INR',
+            listPrice: 30000,
+            discount: 5000,
+            netPayable: 25000,
+            installments: {
+              create: [
+                { dueDate: new Date('2025-08-15'), amount: 10000, status: 'PAID', paidOn: new Date('2025-08-16') },
+                { dueDate: new Date('2025-09-15'), amount: 10000, status: 'PENDING' },
+                { dueDate: new Date('2025-10-15'), amount: 5000, status: 'PENDING' },
+              ],
+            },
+          },
+        },
+      },
+    })
   }
 
-  console.log('Seeded enrollments ✔️');
+  console.log('✅ Seed complete')
 }
-main().finally(()=>prisma.$disconnect());
+
+main().catch(e => {
+  console.error('❌ Seed failed:', e)
+  process.exit(1)
+}).finally(async () => {
+  await prisma.$disconnect()
+})
