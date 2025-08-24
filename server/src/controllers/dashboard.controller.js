@@ -1,66 +1,170 @@
-import { PrismaClient } from '@prisma/client';
+// client/src/pages/Dashboard.jsx
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Card, CardContent, CardHeader, Typography, Grid, Box,
+  CircularProgress, Alert, Table, TableHead, TableBody, TableRow, TableCell,
+  IconButton, Tooltip
+} from '@mui/material';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import PeopleAltIcon from '@mui/icons-material/PeopleAlt';
+import Inventory2Icon from '@mui/icons-material/Inventory2';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import EventIcon from '@mui/icons-material/Event';
+import { getSummary, getTrend, getRecent } from '../lib/dashboardApi';
 
-const prisma = new PrismaClient();
+function Kpi({ icon, label, value, accent = '#7C3AED' }) {
+  return (
+    <Card elevation={2}>
+      <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        <Box sx={{
+          width: 46, height: 46, borderRadius: 2, display: 'grid', placeItems: 'center',
+          background: accent + '22', color: accent
+        }}>
+          {icon}
+        </Box>
+        <div>
+          <Typography variant="overline" color="text.secondary">{label}</Typography>
+          <Typography variant="h5" fontWeight={700}>{value}</Typography>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
-export async function summaryHandler(_req, res, next) {
-  try {
-    const [totalStudents, pendingSum, upcomingSessions] = await Promise.all([
-      prisma.student.count(),
-      prisma.payment.aggregate({
-        _sum: { amount: true },
-        where: { status: 'PENDING' }
-      }),
-      prisma.session.count({
-        where: { startDate: { gte: new Date() } }
-      })
-    ]);
+/* Minimal bar chart (no extra libs) */
+function MiniBar({ data = [], color = '#7C3AED', height = 140 }) {
+  const max = useMemo(() => Math.max(1, ...data.map(d => d.count || 0)), [data]);
+  return (
+    <Box sx={{ height, display: 'flex', alignItems: 'flex-end', gap: 6/2, p: 1 }}>
+      {data.map((d, i) => {
+        const h = Math.round(((d.count || 0) / max) * (height - 40));
+        return (
+          <Tooltip key={i} title={`${d.date}: ${d.count}`} arrow>
+            <Box sx={{
+              width: 10,
+              height: h,
+              background: color,
+              borderRadius: '6px 6px 0 0',
+              transition: 'height 200ms ease'
+            }}/>
+          </Tooltip>
+        );
+      })}
+    </Box>
+  );
+}
 
-    // Enrollments this month by day
-    const start = new Date();
-    start.setDate(1);
-    start.setHours(0,0,0,0);
-    const end = new Date(start);
-    end.setMonth(end.getMonth() + 1);
+export default function Dashboard() {
+  const [summary, setSummary] = useState(null);
+  const [trend, setTrend] = useState([]);
+  const [recent, setRecent] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState('');
 
-    const enrollments = await prisma.enrollment.findMany({
-      where: { createdAt: { gte: start, lt: end } },
-      select: { createdAt: true }
-    });
+  const today = new Date();
+  const year = today.getUTCFullYear();
+  const month = today.getUTCMonth() + 1; // 1..12
 
-    const daysInMonth = new Date(start.getFullYear(), start.getMonth()+1, 0).getDate();
-    const series = Array.from({ length: daysInMonth }, (_, i) => ({ day: i+1, count: 0 }));
-    for (const e of enrollments) {
-      const d = new Date(e.createdAt).getDate();
-      series[d-1].count++;
+  const load = async () => {
+    setLoading(true); setErr('');
+    try {
+      const [s, t, r] = await Promise.all([
+        getSummary(),
+        getTrend({ year, month }),
+        getRecent({ limit: 8 })
+      ]);
+      setSummary(s || {});
+      setTrend(Array.isArray(t) ? t : []);
+      setRecent(Array.isArray(r) ? r : []);
+    } catch (e) {
+      console.error(e);
+      setErr(e?.response?.data?.message || 'Failed to load dashboard');
+    } finally {
+      setLoading(false);
     }
+  };
 
-    // Recent activities (last 10 enrollments)
-    const recent = await prisma.enrollment.findMany({
-      take: 10,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        student: { select: { firstName: true, lastName: true } },
-        session: { select: { name: true } }
-      }
-    });
+  useEffect(() => { load(); }, []); // load on mount
 
-    const recentActivities = recent.map(r => ({
-      type: 'ENROLLMENT',
-      student: `${r.student.firstName} ${r.student.lastName}`,
-      session: r.session.name,
-      date: r.createdAt
-    }));
+  const totalStudents = summary?.totalStudents ?? 0;
+  const totalItems = summary?.inventory?.totalItems ?? 0;
+  const lowStock = summary?.inventory?.lowStockCount ?? 0;
 
-    res.json({
-      kpis: {
-        totalStudents,
-        outstandingDues: pendingSum._sum.amount || 0,
-        upcomingSessions
-      },
-      enrollmentsThisMonth: series,
-      recentActivities
-    });
-  } catch (err) {
-    next(err);
-  }
+  return (
+    <Box sx={{ p: 2 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, gap: 1 }}>
+        <Typography variant="h5" fontWeight={700}>Dashboard</Typography>
+        <IconButton size="small" onClick={load} title="Refresh">
+          <RefreshIcon fontSize="small" />
+        </IconButton>
+      </Box>
+
+      {err && <Alert severity="error" sx={{ mb: 2 }}>{err}</Alert>}
+
+      {loading ? (
+        <Box sx={{ display: 'grid', placeItems: 'center', minHeight: 240 }}>
+          <CircularProgress />
+        </Box>
+      ) : (
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={4}>
+            <Kpi icon={<PeopleAltIcon />} label="Total Students" value={totalStudents} accent="#0EA5E9" />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <Kpi icon={<Inventory2Icon />} label="Inventory Items" value={totalItems} accent="#22C55E" />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <Kpi icon={<WarningAmberIcon />} label="Low-Stock Items" value={lowStock} accent="#F59E0B" />
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <Card elevation={2}>
+              <CardHeader
+                title="Enrollments This Month"
+                subheader={`${year}-${String(month).padStart(2,'0')}`}
+                action={<EventIcon color="action" />}
+              />
+              <CardContent sx={{ pt: 0 }}>
+                {trend.length === 0 ? (
+                  <Typography color="text.secondary">No enrollments yet this month.</Typography>
+                ) : (
+                  <MiniBar data={trend} />
+                )}
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <Card elevation={2}>
+              <CardHeader title="Recent Enrollments" />
+              <CardContent sx={{ pt: 0 }}>
+                {recent.length === 0 ? (
+                  <Typography color="text.secondary">No recent enrollments.</Typography>
+                ) : (
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Name</TableCell>
+                        <TableCell>Session</TableCell>
+                        <TableCell>Joined</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {recent.map((r) => (
+                        <TableRow key={r.id}>
+                          <TableCell>{r.name}</TableCell>
+                          <TableCell>{r.session || '-'}</TableCell>
+                          <TableCell>{new Date(r.joinedAt).toLocaleString()}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+      )}
+    </Box>
+  );
 }

@@ -1,42 +1,69 @@
-import { PrismaClient } from '@prisma/client'
-import bcrypt from 'bcryptjs'
-import jwt from 'jsonwebtoken'
+// server/src/controllers/auth.controller.js
+import { PrismaClient } from '@prisma/client';
+// import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
+import { z } from 'zod';
 
-const prisma = new PrismaClient()
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret'
+// server/src/controllers/auth.controller.js
+import bcrypt from 'bcryptjs'
+
+
+const prisma = new PrismaClient();
+
+const LoginSchema = z.object({
+  username: z.string().min(1, 'Required'),
+  password: z.string().min(1, 'Required'),
+});
+
+function logDebug(...args) {
+  if (process.env.AUTH_DEBUG === 'true') console.debug('[AUTH]', ...args);
+}
 
 export async function loginHandler(req, res) {
   try {
-    const username = (req.body.username || '').trim()
-    const password = req.body.password || ''
-    if (!username || !password) return res.status(400).json({ error: 'username and password required' })
+    const { username, password } = LoginSchema.parse(req.body);
 
-    const user = await prisma.user.findUnique({ where: { username } })
-    if (!user) return res.status(401).json({ error: 'Invalid credentials' })
+    const uname = String(username || '').trim().toLowerCase();
+    logDebug('login attempt', { uname });
 
-    const ok = await bcrypt.compare(password, user.passwordHash)
-    if (!ok) return res.status(401).json({ error: 'Invalid credentials' })
+    // 1) find user by normalized username
+    const user = await prisma.user.findUnique({ where: { username: uname } });
+    if (!user) {
+      logDebug('user NOT FOUND', { uname });
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+    logDebug('user FOUND', { id: user.id, role: user.role });
 
-    const token = jwt.sign({ sub: user.id, role: user.role }, JWT_SECRET, { expiresIn: '8h' })
-    res.json({ token, user: { id: user.id, username: user.username, fullName: user.fullName, role: user.role } })
-  } catch (e) {
-    console.error('Login error:', e)
-    res.status(500).json({ error: 'Server error' })
+    // 2) bcrypt compare
+    const ok = await bcrypt.compare(password, user.passwordHash || '');
+    if (!ok) {
+      logDebug('PASSWORD MISMATCH', { uname });
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+
+    // 3) issue JWT
+    if (!process.env.JWT_SECRET) {
+      console.error('JWT_SECRET missing in .env');
+      return res.status(500).json({ message: 'Server misconfigured' });
+    }
+
+    const token = jwt.sign(
+      { sub: user.id, username: user.username, role: user.role, name: user.fullName },
+      process.env.JWT_SECRET,
+      { expiresIn: '8h' }
+    );
+
+    res.json({
+      token,
+      user: { id: user.id, username: user.username, fullName: user.fullName, role: user.role }
+    });
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ message: 'Invalid input' });
+    console.error(err);
+    res.status(500).json({ message: 'Unexpected error' });
   }
 }
 
 export async function meHandler(req, res) {
-  try {
-    const userId = req.jwt?.sub
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' })
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, username: true, fullName: true, role: true, createdAt: true }
-    })
-    if (!user) return res.status(404).json({ error: 'User not found' })
-    res.json({ user })
-  } catch (e) {
-    console.error('Me error:', e)
-    res.status(500).json({ error: 'Server error' })
-  }
+  res.json({ user: req.user });
 }

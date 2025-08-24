@@ -1,3 +1,5 @@
+// server/prisma/schema.prisma
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,7 +9,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ===== Enums =====
+// Enums
 enum Role {
   ADMIN
   MANAGER
@@ -16,42 +18,54 @@ enum Role {
   VIEWER
 }
 
-enum EnrollStatus {
-  LEAD
-  APPLICANT
-  ENROLLED
-  ACTIVE
-  COMPLETED
-  ALUMNI
-  CANCELED
-}
-
 enum PayStatus {
   PENDING
   PARTIAL
   PAID
-  REFUNDED
 }
 
-// ===== Models =====
+enum InvStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum TxnType {
+  RECEIVE
+  ISSUE
+  ADJUST
+  RETURN
+  DISPOSE
+}
+
+// Users
 model User {
-  id            Int                       @id @default(autoincrement())
-  username      String                    @unique
-  passwordHash  String
-  fullName      String
-  role          Role                      @default(ADMIN)
-  createdAt     DateTime                  @default(now())
-  updatedAt     DateTime                  @updatedAt
-  savedViews    SavedView[]
-  logs          AuditLog[]
-  statusChanges EnrollmentStatusHistory[]
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String
+  fullName     String
+  role         Role     @default(ADMIN)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// Students / Programs / Sessions / Enrollments
+model Student {
+  id          Int          @id @default(autoincrement())
+  firstName   String
+  lastName    String
+  email       String       @unique
+  phone       String?
+  status      String       @default("ACTIVE")
+  enrollments Enrollment[]
+  tags        StudentTag[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
 }
 
 model Program {
-  id        Int      @id @default(autoincrement())
-  name      String   @unique
-  createdAt DateTime @default(now())
-  batches   Batch[]
+  id      Int     @id @default(autoincrement())
+  name    String  @unique
+  batches Batch[]
 }
 
 model Batch {
@@ -64,46 +78,12 @@ model Batch {
 
 model Session {
   id          Int          @id @default(autoincrement())
-  name        String
+  name        String       @unique
   startDate   DateTime
   endDate     DateTime
-  batchId     Int?
-  batch       Batch?       @relation(fields: [batchId], references: [id])
-  createdAt   DateTime     @default(now())
+  batchId     Int
+  batch       Batch        @relation(fields: [batchId], references: [id])
   enrollments Enrollment[]
-}
-
-model Student {
-  id              Int                       @id @default(autoincrement())
-  firstName       String
-  lastName        String
-  email           String                    @unique
-  phone           String?
-  dob             DateTime?
-  address         String?
-  city            String?
-  state           String?
-  zip             String?
-  status          EnrollStatus              @default(LEAD)
-  createdAt       DateTime                  @default(now())
-  updatedAt       DateTime                  @updatedAt
-  enrollments     Enrollment[]
-  payments        Payment[]
-  guardians       Guardian[]
-  documents       StudentDocument[]
-  tags            StudentTag[]
-  statusHistories EnrollmentStatusHistory[]
-  notes           String?
-}
-
-model Guardian {
-  id        Int     @id @default(autoincrement())
-  studentId Int
-  relation  String
-  name      String
-  phone     String?
-  email     String?
-  student   Student @relation(fields: [studentId], references: [id])
 }
 
 model Enrollment {
@@ -114,62 +94,34 @@ model Enrollment {
   student   Student  @relation(fields: [studentId], references: [id])
   session   Session  @relation(fields: [sessionId], references: [id])
   feePlan   FeePlan?
+
+  @@index([joinedAt])
 }
 
 model FeePlan {
   id           Int           @id @default(autoincrement())
   enrollmentId Int           @unique
-  currency     String        @default("INR")
-  listPrice    Float
-  discount     Float         @default(0)
-  netPayable   Float
-  installments Installment[]
+  currency     String        @default("USD")
+  listPrice    Int
+  discount     Int           @default(0)
+  netPayable   Int
   enrollment   Enrollment    @relation(fields: [enrollmentId], references: [id])
+  installments Installment[]
 }
 
 model Installment {
-  id           Int                  @id @default(autoincrement())
-  feePlanId    Int
-  dueDate      DateTime
-  amount       Float
-  status       PayStatus            @default(PENDING)
-  paidOn       DateTime?
-  feePlan      FeePlan              @relation(fields: [feePlanId], references: [id])
-  transactions PaymentTransaction[]
-
-  @@index([dueDate])
-  @@index([status])
-}
-
-model Payment {
   id        Int       @id @default(autoincrement())
-  studentId Int
+  feePlanId Int
+  dueDate   DateTime
   amount    Float
   status    PayStatus @default(PENDING)
-  createdAt DateTime  @default(now())
-  student   Student   @relation(fields: [studentId], references: [id])
+  paidOn    DateTime?
+  feePlan   FeePlan   @relation(fields: [feePlanId], references: [id])
+
+  @@index([status, dueDate])
 }
 
-model PaymentTransaction {
-  id            Int         @id @default(autoincrement())
-  installmentId Int
-  amount        Float
-  reference     String?
-  createdAt     DateTime    @default(now())
-  installment   Installment @relation(fields: [installmentId], references: [id])
-}
-
-model StudentDocument {
-  id         Int      @id @default(autoincrement())
-  studentId  Int
-  title      String
-  filename   String
-  url        String
-  verified   Boolean  @default(false)
-  uploadedAt DateTime @default(now())
-  student    Student  @relation(fields: [studentId], references: [id])
-}
-
+// Tags (many-to-many)
 model Tag {
   id       Int          @id @default(autoincrement())
   name     String       @unique
@@ -180,42 +132,70 @@ model Tag {
 model StudentTag {
   studentId Int
   tagId     Int
-
-  student Student @relation(fields: [studentId], references: [id])
-  tag     Tag     @relation(fields: [tagId], references: [id])
+  student   Student @relation(fields: [studentId], references: [id])
+  tag       Tag     @relation(fields: [tagId], references: [id])
 
   @@id([studentId, tagId])
 }
 
-model EnrollmentStatusHistory {
-  id        Int          @id @default(autoincrement())
-  studentId Int
-  from      EnrollStatus
-  to        EnrollStatus
-  changedAt DateTime     @default(now())
+// Inventory / Suppliers
+model Supplier {
+  id        Int             @id @default(autoincrement())
+  name      String          @unique
+  contact   String?
+  phone     String?
+  email     String?
+  address   String?
+  items     InventoryItem[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+}
+
+model InventoryItem {
+  id                Int                    @id @default(autoincrement())
+  name              String
+  sku               String                 @unique
+  category          String?
+  unit              String?                @default("pcs")
+  stock             Int                    @default(0)
+  issued            Int                    @default(0)
+  lowStockThreshold Int                    @default(0)
+  location          String?
+  status            InvStatus              @default(ACTIVE)
+  imageUrl          String?
+  supplierId        Int?
+  supplier          Supplier?              @relation(fields: [supplierId], references: [id])
+  notes             String?
+  transactions      InventoryTransaction[]
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  @@index([status])
+  @@index([category])
+  @@index([updatedAt])
+}
+
+model InventoryTransaction {
+  id        Int           @id @default(autoincrement())
+  itemId    Int
+  type      TxnType
+  qty       Int
+  note      String?
   userId    Int?
+  createdAt DateTime      @default(now())
+  item      InventoryItem @relation(fields: [itemId], references: [id])
 
-  student Student @relation(fields: [studentId], references: [id])
-  user    User?   @relation(fields: [userId], references: [id])
+  @@index([itemId, createdAt])
+  @@index([type])
 }
 
-model SavedView {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  name      String
-  entity    String
-  config    Json
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id])
-}
-
+// Audit Log
 model AuditLog {
   id        Int      @id @default(autoincrement())
-  userId    Int?
   action    String
   entity    String
   entityId  Int?
+  userId    Int?
   meta      Json?
   createdAt DateTime @default(now())
-  user      User?    @relation(fields: [userId], references: [id])
 }
